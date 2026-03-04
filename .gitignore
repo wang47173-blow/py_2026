@@ -1,0 +1,19 @@
+# Python
+__pycache__/
+*.py[cod]
+*.so
+.pytest_cache/
+.coverage
+htmlcov/
+
+# Environments
+.venv/
+.env
+
+# IDE
+.vscode/
+.idea/
+
+# Runtime/demo artifacts
+data/
+*.log

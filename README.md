@@ -121,3 +121,18 @@ open http://localhost:16686
 ## Enterprise-readiness note
 
 This repo now covers end-to-end runnable baseline for interviews. For production, migrate in-memory rate-limit to Redis and move schema DDL to Alembic migrations.
+
+
+## Developer workflow
+
+```bash
+make install
+make lint
+make test-fast
+```
+
+## Security defaults
+
+- `index_docs` data source is restricted under `EKA_INGEST_DATA_ROOT`.
+- Ingestion retries are configurable via `EKA_INGEST_MAX_RETRIES`.
+- Keep `.env` local only; never commit keys.

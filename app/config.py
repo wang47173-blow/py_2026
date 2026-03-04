@@ -20,6 +20,9 @@ class Settings(BaseSettings):
     enable_rate_limit: bool = True
     rate_limit_requests_per_minute: int = 60
 
+    ingest_data_root: str = "./data"
+    ingest_max_retries: int = 2
+
     enable_tracing: bool = True
     otel_exporter_otlp_endpoint: str = "http://jaeger:4318/v1/traces"
 
