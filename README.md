@@ -1,28 +1,41 @@
-# Enterprise Knowledge Assistant Gateway (M1)
+# Enterprise Knowledge Assistant Gateway (M1+)
 
-M1 delivers a runnable ingestion MVP for an enterprise RAG + MCP system:
-- FastAPI app skeleton
-- MCP endpoints for tool/resource/prompt descriptors
-- `index_docs` ingestion tool endpoint + async job status endpoint
-- md/txt local-folder ingestion, chunking, placeholder embedding, DB persistence
-- Health endpoints (`/healthz`, `/readyz`)
-- PostgreSQL + pgvector via Docker Compose
-- Prometheus metrics endpoint (`/metrics`)
+This project now includes:
+- MCP-compatible tool descriptors (`/mcp/tools`)
+- `index_docs` ingestion (md/txt folder -> chunks -> embeddings -> DB)
+- `rag_query` using **LangChain Fireworks GLM-5**
+- `list_corpora` and resources endpoints
+- health/readiness/metrics endpoints
 
-## Quick start (Docker)
+## 1) Prepare `.env`
+
+```bash
+cp .env.example .env
+```
+
+Open `.env` and fill your key:
+
+```env
+EKA_FIREWORKS_API_KEY=
+```
+
+> Keep it empty in git, fill locally only.
+
+## 2) Run with Docker
 
 ```bash
 docker compose up --build
 ```
 
-### In another terminal, verify health
+## 3) Quick API checks
 
 ```bash
 curl http://localhost:8080/healthz
 curl http://localhost:8080/readyz
+curl http://localhost:8080/mcp/tools
 ```
 
-### Run M1 ingestion
+## 4) Index sample docs
 
 ```bash
 mkdir -p data
@@ -42,21 +55,36 @@ curl -X POST http://localhost:8080/mcp/tools/index_docs \
   }'
 ```
 
-Query job status:
+Get job status:
 
 ```bash
 curl http://localhost:8080/mcp/tools/index_docs/<job_id>
 ```
 
-## Local tests
+## 5) Run `rag_query` (Fireworks GLM-5)
+
+```bash
+curl -X POST http://localhost:8080/mcp/tools/rag_query \
+  -H 'Content-Type: application/json' \
+  -d '{
+    "question": "What does the handbook say about security?",
+    "tenant_id": "11111111-1111-1111-1111-111111111111",
+    "user_id": "22222222-2222-2222-2222-222222222222",
+    "top_k": 3,
+    "filters": {}
+  }'
+```
+
+## Conda local run (`s_env`)
 
 ```bash
 conda activate s_env
 pip install -r requirements.txt pytest
-pytest -q
+uvicorn app.main:app --host 0.0.0.0 --port 8080
 ```
 
-## What comes in M2+
-- ACL-aware retrieval and `rag_query`
-- citation formatting
-- audit logging and evaluation scripts
+## Tests
+
+```bash
+pytest -q
+```

@@ -1,4 +1,4 @@
-"""MCP skeleton and M1 tool contracts."""
+"""MCP metadata contracts."""
 
 TOOLS = [
     {
@@ -8,22 +8,24 @@ TOOLS = [
     },
     {
         "name": "rag_query",
-        "description": "(M2+) Query enterprise knowledge base with ACL and citations.",
+        "description": "Query enterprise KB via Fireworks GLM-5. POST /mcp/tools/rag_query",
+        "input": ["question", "tenant_id", "user_id", "top_k", "filters"],
     },
     {
         "name": "list_corpora",
-        "description": "(M2+) List corpora and stats for tenant.",
+        "description": "List indexed docs and stats. GET /mcp/tools/list_corpora/{tenant_id}",
+        "input": ["tenant_id"],
     },
 ]
 
 RESOURCES = [
-    {"uri": "/tenants/{id}/docs", "description": "Tenant document listing. (M2+)"},
-    {"uri": "/tenants/{id}/stats", "description": "Tenant retrieval statistics. (M2+)"},
+    {"uri": "/tenants/{id}/docs", "description": "Tenant document listing."},
+    {"uri": "/tenants/{id}/stats", "description": "Tenant retrieval statistics."},
 ]
 
 PROMPTS = [
     {
         "name": "enterprise_qa",
-        "description": "Enterprise QA prompt with citation-first and refusal rules.",
+        "description": "Only answer using retrieved enterprise evidence; cite sources and refuse if evidence is insufficient.",
     }
 ]

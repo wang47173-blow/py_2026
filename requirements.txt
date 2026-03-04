@@ -4,3 +4,5 @@ sqlalchemy==2.0.43
 psycopg[binary]==3.2.9
 prometheus-client==0.22.1
 pydantic-settings==2.10.1
+langchain==0.3.27
+langchain-fireworks==0.3.0

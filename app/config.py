@@ -9,6 +9,10 @@ class Settings(BaseSettings):
 
     database_url: str = "postgresql+psycopg://app:app@postgres:5432/eka"
 
+    # Fireworks + GLM-5 (LangChain)
+    fireworks_api_key: str = ""
+    fireworks_model: str = "accounts/fireworks/models/glm-5"
+
     log_level: str = "INFO"
     enable_metrics: bool = True
 

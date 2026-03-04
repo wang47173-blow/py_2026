@@ -12,7 +12,15 @@ from app.db import ping_db
 from app.ingestion import create_index_job, get_job_status, init_schema, run_index_job
 from app.logging import setup_logging
 from app.mcp_skeleton import PROMPTS, RESOURCES, TOOLS
-from app.schemas import IndexDocsRequest, IndexDocsResponse, JobStatusResponse
+from app.rag import list_corpora, rag_query
+from app.schemas import (
+    IndexDocsRequest,
+    IndexDocsResponse,
+    JobStatusResponse,
+    ListCorporaResponse,
+    RagQueryRequest,
+    RagQueryResponse,
+)
 
 setup_logging(settings.log_level)
 
@@ -83,3 +91,35 @@ async def index_docs_status(job_id: UUID) -> JobStatusResponse:
     if not status:
         raise HTTPException(status_code=404, detail="job not found")
     return JobStatusResponse(**status)
+
+
+@app.post("/mcp/tools/rag_query", response_model=RagQueryResponse)
+async def mcp_rag_query(payload: RagQueryRequest) -> RagQueryResponse:
+    try:
+        res = await rag_query(
+            question=payload.question,
+            tenant_id=str(payload.tenant_id),
+            top_k=payload.top_k,
+            filters=payload.filters,
+        )
+        return RagQueryResponse(**res)
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
+
+
+@app.get("/mcp/tools/list_corpora/{tenant_id}", response_model=ListCorporaResponse)
+async def mcp_list_corpora(tenant_id: UUID) -> ListCorporaResponse:
+    res = await list_corpora(str(tenant_id))
+    return ListCorporaResponse(**res)
+
+
+@app.get("/tenants/{tenant_id}/docs", response_model=ListCorporaResponse)
+async def resource_docs(tenant_id: UUID) -> ListCorporaResponse:
+    res = await list_corpora(str(tenant_id))
+    return ListCorporaResponse(**res)
+
+
+@app.get("/tenants/{tenant_id}/stats")
+async def resource_stats(tenant_id: UUID) -> dict:
+    res = await list_corpora(str(tenant_id))
+    return {"stats": res["stats"]}

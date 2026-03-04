@@ -8,7 +8,8 @@ from uuid import UUID, uuid4
 
 from sqlalchemy import text
 
-from app.chunking import chunk_text, fake_embedding
+from app.chunking import chunk_text
+from app.rag import embed_texts
 from app.db import engine
 
 SUPPORTED_EXT = {".md", ".txt"}
@@ -178,6 +179,7 @@ async def run_index_job(job_id: UUID) -> None:
                     },
                 )
 
+                embeddings = await embed_texts(split)
                 for i, c in enumerate(split):
                     chunk_id = uuid4()
                     chunks += 1
@@ -194,7 +196,7 @@ async def run_index_job(job_id: UUID) -> None:
                             "document_id": str(doc_id),
                             "chunk_index": i,
                             "content": c,
-                            "embedding": __import__("json").dumps(fake_embedding(c)),
+                            "embedding": __import__("json").dumps(embeddings[i]),
                             "metadata": __import__("json").dumps({"visibility_policy": visibility_policy, "tags": tags}),
                         },
                     )

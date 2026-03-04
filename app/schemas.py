@@ -24,3 +24,29 @@ class JobStatusResponse(BaseModel):
     processed_docs: int
     processed_chunks: int
     error_message: str | None = None
+
+
+class RagQueryRequest(BaseModel):
+    question: str
+    tenant_id: UUID
+    user_id: UUID
+    top_k: int = 5
+    filters: dict[str, Any] = Field(default_factory=dict)
+
+
+class Citation(BaseModel):
+    chunk_id: UUID
+    source: str
+    snippet: str
+
+
+class RagQueryResponse(BaseModel):
+    answer: str
+    citations: list[Citation]
+    used_chunks: int
+    latency_ms: int
+
+
+class ListCorporaResponse(BaseModel):
+    docs: list[dict[str, Any]]
+    stats: dict[str, int]

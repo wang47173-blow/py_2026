@@ -1,6 +1,8 @@
 services:
   app:
     build: .
+    env_file:
+      - .env
     environment:
       - EKA_DATABASE_URL=postgresql+psycopg://app:app@postgres:5432/eka
       - EKA_LOG_LEVEL=INFO
