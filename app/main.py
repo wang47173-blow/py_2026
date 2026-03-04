@@ -16,6 +16,7 @@ from app.db import ping_db
 from app.ingestion import create_index_job, get_job_status, init_schema, run_index_job
 from app.logging import setup_logging
 from app.mcp_skeleton import PROMPTS, RESOURCES, TOOLS
+from app.mcp_rpc import handle_mcp_rpc
 from app.migrations import run_migrations
 from app.rag import list_corpora, rag_query
 from app.rate_limit import allow_request
@@ -62,6 +63,13 @@ async def middleware(request: Request, call_next):
         response = await call_next(request)
         REQUEST_COUNTER.labels(path=request.url.path, status=str(response.status_code)).inc()
         return response
+
+
+
+
+@app.post("/mcp")
+async def mcp_json_rpc(payload: dict) -> dict:
+    return await handle_mcp_rpc(payload)
 
 
 @app.get("/healthz")
