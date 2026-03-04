@@ -20,6 +20,9 @@ class Settings(BaseSettings):
     enable_rate_limit: bool = True
     rate_limit_requests_per_minute: int = 60
 
+    enable_tracing: bool = True
+    otel_exporter_otlp_endpoint: str = "http://jaeger:4318/v1/traces"
+
     log_level: str = "INFO"
     enable_metrics: bool = True
 

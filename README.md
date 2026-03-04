@@ -8,7 +8,7 @@ This version includes M0~M5 essentials:
 - Guardrails for prompt-injection patterns + refusal behavior
 - Audit logs (`query_logs`, `query_chunk_access`)
 - Rate limit + timeout + top_k/context budget controls
-- Metrics endpoint + Prometheus + optional Jaeger service
+- Metrics endpoint + Prometheus + OpenTelemetry tracing (OTLP -> Jaeger)
 - Eval suite with 20-sample golden dataset
 
 ## 1) Configure `.env`
@@ -110,3 +110,14 @@ conda activate s_env
 pip install -r requirements.txt pytest
 uvicorn app.main:app --host 0.0.0.0 --port 8080
 ```
+
+
+## 7) Optional: open Jaeger UI
+
+```bash
+open http://localhost:16686
+```
+
+## Enterprise-readiness note
+
+This repo now covers end-to-end runnable baseline for interviews. For production, migrate in-memory rate-limit to Redis and move schema DDL to Alembic migrations.

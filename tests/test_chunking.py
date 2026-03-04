@@ -1,4 +1,4 @@
-from app.chunking import chunk_text, fake_embedding
+from app.chunking import chunk_text
 
 
 def test_chunk_text_splits_with_overlap() -> None:
@@ -8,7 +8,5 @@ def test_chunk_text_splits_with_overlap() -> None:
     assert len(chunks[0]) == 500
 
 
-def test_fake_embedding_shape() -> None:
-    vec = fake_embedding("hello", dim=8)
-    assert len(vec) == 8
-    assert all(isinstance(v, float) for v in vec)
+def test_chunk_text_empty_input() -> None:
+    assert chunk_text("   \n\t ") == []

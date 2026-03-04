@@ -8,11 +8,13 @@ from uuid import UUID, uuid4
 
 from sqlalchemy import text
 
+from app.acl import build_acl_rules
 from app.chunking import chunk_text
 from app.rag import embed_texts
 from app.db import engine
 
 SUPPORTED_EXT = {".md", ".txt"}
+
 
 
 async def init_schema() -> None:
@@ -258,6 +260,25 @@ async def run_index_job(job_id: UUID) -> None:
                             "metadata": __import__("json").dumps({"visibility_policy": visibility_policy, "tags": tags}),
                         },
                     )
+
+
+                    for rule in build_acl_rules(visibility_policy):
+                        await conn.execute(
+                            text(
+                                """
+                                INSERT INTO acl_policies(id, tenant_id, resource_type, resource_id, effect, subject_type, subject_id)
+                                VALUES(:id, :tenant_id, 'chunk', :resource_id, :effect, :subject_type, :subject_id)
+                                """
+                            ),
+                            {
+                                "id": str(uuid4()),
+                                "tenant_id": str(tenant_id),
+                                "resource_id": str(chunk_id),
+                                "effect": str(rule["effect"]),
+                                "subject_type": str(rule["subject_type"]),
+                                "subject_id": rule["subject_id"],
+                            },
+                        )
 
             async with engine.begin() as conn:
                 await conn.execute(

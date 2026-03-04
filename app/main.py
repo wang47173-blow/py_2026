@@ -1,10 +1,12 @@
 from __future__ import annotations
 
 import asyncio
+import logging
 from uuid import UUID
 
 from fastapi import FastAPI, HTTPException, Request
 from fastapi.responses import JSONResponse, PlainTextResponse
+from opentelemetry import trace
 from prometheus_client import CONTENT_TYPE_LATEST, Counter, Histogram, generate_latest
 
 from app.config import settings
@@ -22,8 +24,12 @@ from app.schemas import (
     RagQueryRequest,
     RagQueryResponse,
 )
+from app.tracing import setup_tracing
 
 setup_logging(settings.log_level)
+setup_tracing()
+logger = logging.getLogger(__name__)
+tracer = trace.get_tracer(__name__)
 
 app = FastAPI(title=settings.app_name)
 REQUEST_COUNTER = Counter("eka_http_requests_total", "Total HTTP requests", ["path", "status"])
@@ -38,11 +44,12 @@ async def startup_event() -> None:
 @app.middleware("http")
 async def middleware(request: Request, call_next):
     identity = request.headers.get("x-user-id", "anonymous")
-    if not allow_request(identity):
-        return JSONResponse(status_code=429, content={"detail": "rate limit exceeded"})
-    response = await call_next(request)
-    REQUEST_COUNTER.labels(path=request.url.path, status=str(response.status_code)).inc()
-    return response
+    with tracer.start_as_current_span(f"http {request.method} {request.url.path}"):
+        if not allow_request(identity):
+            return JSONResponse(status_code=429, content={"detail": "rate limit exceeded"})
+        response = await call_next(request)
+        REQUEST_COUNTER.labels(path=request.url.path, status=str(response.status_code)).inc()
+        return response
 
 
 @app.get("/healthz")
@@ -78,6 +85,13 @@ async def mcp_prompts():
     return {"prompts": PROMPTS}
 
 
+async def _run_job_safe(job_id: UUID) -> None:
+    try:
+        await run_index_job(job_id)
+    except Exception as exc:  # noqa: BLE001
+        logger.exception("background index job failed: %s", exc)
+
+
 @app.post("/mcp/tools/index_docs", response_model=IndexDocsResponse)
 async def index_docs(payload: IndexDocsRequest) -> IndexDocsResponse:
     job_id = await create_index_job(
@@ -87,7 +101,7 @@ async def index_docs(payload: IndexDocsRequest) -> IndexDocsResponse:
         tags=payload.tags,
         idempotency_key=payload.idempotency_key,
     )
-    asyncio.create_task(run_index_job(job_id))
+    asyncio.create_task(_run_job_safe(job_id))
     return IndexDocsResponse(job_id=job_id)
 
 
