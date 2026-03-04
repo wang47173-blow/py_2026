@@ -1,15 +1,20 @@
 from __future__ import annotations
 
+import hashlib
 import json
 import math
 import time
 from typing import Any
+from uuid import uuid4
 
 from langchain_fireworks import ChatFireworks, FireworksEmbeddings
 from sqlalchemy import text
 
+from app.audit import log_query, log_query_chunks
+from app.authz import is_chunk_allowed
 from app.config import settings
 from app.db import engine
+from app.guardrails import enforce_refusal_if_needed, validate_citations
 
 
 def _require_fireworks_key() -> str:
@@ -39,13 +44,15 @@ async def embed_query(query: str) -> list[float]:
     return await __import__("asyncio").to_thread(emb.embed_query, query)
 
 
-async def retrieve_chunks(*, tenant_id: str, top_k: int, filters: dict[str, Any], query_embedding: list[float]) -> list[dict[str, Any]]:
+async def retrieve_chunks(
+    *, tenant_id: str, user_id: str, top_k: int, filters: dict[str, Any], query_embedding: list[float]
+) -> list[dict[str, Any]]:
     tag_filter = (filters or {}).get("tag")
     async with engine.connect() as conn:
         rs = await conn.execute(
             text(
                 """
-                SELECT c.id, c.content, c.embedding, c.metadata, d.source_uri
+                SELECT c.id, c.document_id, c.content, c.embedding, c.metadata, d.source_uri
                 FROM document_chunks c
                 JOIN documents d ON d.id = c.document_id
                 WHERE c.tenant_id = :tenant_id
@@ -57,24 +64,30 @@ async def retrieve_chunks(*, tenant_id: str, top_k: int, filters: dict[str, Any]
 
     scored: list[dict[str, Any]] = []
     for row in rows:
-        metadata = row[3] if isinstance(row[3], dict) else json.loads(row[3] or "{}")
+        metadata = row[4] if isinstance(row[4], dict) else json.loads(row[4] or "{}")
         tags = metadata.get("tags", [])
         if tag_filter and tag_filter not in tags:
             continue
-        embedding = row[2] if isinstance(row[2], list) else json.loads(row[2])
+
+        allowed = await is_chunk_allowed(tenant_id, user_id, str(row[0]))
+        if not allowed:
+            continue
+
+        embedding = row[3] if isinstance(row[3], list) else json.loads(row[3])
         score = _cosine(query_embedding, [float(v) for v in embedding])
         scored.append(
             {
                 "chunk_id": row[0],
-                "snippet": row[1][:240],
-                "content": row[1],
-                "source": row[4],
+                "document_id": row[1],
+                "snippet": row[2][:240],
+                "content": row[2],
+                "source": row[5],
                 "score": score,
             }
         )
 
     scored.sort(key=lambda x: x["score"], reverse=True)
-    return scored[:max(1, min(top_k, 20))]
+    return scored[:max(1, min(top_k, settings.max_top_k))]
 
 
 async def generate_answer(question: str, chunks: list[dict[str, Any]]) -> str:
@@ -84,23 +97,51 @@ async def generate_answer(question: str, chunks: list[dict[str, Any]]) -> str:
     citations_text = "\n".join(
         f"[{i+1}] chunk_id={c['chunk_id']} source={c['source']}\n{c['content']}" for i, c in enumerate(chunks)
     )
+    citations_text = citations_text[: settings.max_context_chars]
+
     prompt = (
-        "你是企业知识助手。仅可基于给定证据回答，若证据不足请明确说不知道。"
-        "输出简洁答案，并引用证据编号。\n\n"
-        f"问题: {question}\n\n"
-        f"证据:\n{citations_text}"
+        "你是企业知识助手。严格执行：1) 只基于证据回答；2) 必须给出证据编号；3) 证据不足就明确拒答。\n\n"
+        f"问题: {question}\n\n证据:\n{citations_text}"
     )
     resp = await llm.ainvoke(prompt)
     return resp.content if hasattr(resp, "content") else str(resp)
 
 
-async def rag_query(*, question: str, tenant_id: str, top_k: int, filters: dict[str, Any]) -> dict[str, Any]:
+async def rag_query(*, question: str, tenant_id: str, user_id: str, top_k: int, filters: dict[str, Any]) -> dict[str, Any]:
     start = time.perf_counter()
+
     q_emb = await embed_query(question)
-    chunks = await retrieve_chunks(tenant_id=tenant_id, top_k=top_k, filters=filters, query_embedding=q_emb)
-    answer = await generate_answer(question, chunks)
+    chunks = await retrieve_chunks(
+        tenant_id=tenant_id,
+        user_id=user_id,
+        top_k=top_k,
+        filters=filters,
+        query_embedding=q_emb,
+    )
+
+    refusal = enforce_refusal_if_needed(question, chunks)
+    if refusal:
+        answer = refusal
+    else:
+        answer = await generate_answer(question, chunks)
+
     latency = int((time.perf_counter() - start) * 1000)
     citations = [{"chunk_id": c["chunk_id"], "source": c["source"], "snippet": c["snippet"]} for c in chunks]
+    if not validate_citations(citations):
+        answer = "系统检测到引用格式异常，拒绝返回不可信结果。"
+        citations = []
+
+    query_id = str(uuid4())
+    await log_query(
+        query_id=query_id,
+        tenant_id=tenant_id,
+        user_id=user_id,
+        question_hash=hashlib.sha256(question.encode("utf-8")).hexdigest(),
+        top_k=top_k,
+        latency_ms=latency,
+    )
+    await log_query_chunks(query_id=query_id, chunks=chunks)
+
     return {"answer": answer, "citations": citations, "used_chunks": len(chunks), "latency_ms": latency}
 
 

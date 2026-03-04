@@ -13,6 +13,13 @@ class Settings(BaseSettings):
     fireworks_api_key: str = ""
     fireworks_model: str = "accounts/fireworks/models/glm-5"
 
+    # Non-functional controls
+    query_timeout_s: int = 25
+    max_top_k: int = 8
+    max_context_chars: int = 12000
+    enable_rate_limit: bool = True
+    rate_limit_requests_per_minute: int = 60
+
     log_level: str = "INFO"
     enable_metrics: bool = True
 

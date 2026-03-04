@@ -3,9 +3,9 @@ from __future__ import annotations
 import asyncio
 from uuid import UUID
 
-from fastapi import FastAPI, HTTPException
+from fastapi import FastAPI, HTTPException, Request
 from fastapi.responses import JSONResponse, PlainTextResponse
-from prometheus_client import CONTENT_TYPE_LATEST, Counter, generate_latest
+from prometheus_client import CONTENT_TYPE_LATEST, Counter, Histogram, generate_latest
 
 from app.config import settings
 from app.db import ping_db
@@ -13,6 +13,7 @@ from app.ingestion import create_index_job, get_job_status, init_schema, run_ind
 from app.logging import setup_logging
 from app.mcp_skeleton import PROMPTS, RESOURCES, TOOLS
 from app.rag import list_corpora, rag_query
+from app.rate_limit import allow_request
 from app.schemas import (
     IndexDocsRequest,
     IndexDocsResponse,
@@ -25,7 +26,8 @@ from app.schemas import (
 setup_logging(settings.log_level)
 
 app = FastAPI(title=settings.app_name)
-REQUEST_COUNTER = Counter("eka_http_requests_total", "Total HTTP requests", ["path"])
+REQUEST_COUNTER = Counter("eka_http_requests_total", "Total HTTP requests", ["path", "status"])
+RAG_LATENCY = Histogram("eka_rag_latency_ms", "RAG latency ms", buckets=(50, 100, 300, 800, 1500, 3000, 8000))
 
 
 @app.on_event("startup")
@@ -34,9 +36,13 @@ async def startup_event() -> None:
 
 
 @app.middleware("http")
-async def count_requests(request, call_next):
-    REQUEST_COUNTER.labels(path=request.url.path).inc()
-    return await call_next(request)
+async def middleware(request: Request, call_next):
+    identity = request.headers.get("x-user-id", "anonymous")
+    if not allow_request(identity):
+        return JSONResponse(status_code=429, content={"detail": "rate limit exceeded"})
+    response = await call_next(request)
+    REQUEST_COUNTER.labels(path=request.url.path, status=str(response.status_code)).inc()
+    return response
 
 
 @app.get("/healthz")
@@ -96,15 +102,22 @@ async def index_docs_status(job_id: UUID) -> JobStatusResponse:
 @app.post("/mcp/tools/rag_query", response_model=RagQueryResponse)
 async def mcp_rag_query(payload: RagQueryRequest) -> RagQueryResponse:
     try:
-        res = await rag_query(
-            question=payload.question,
-            tenant_id=str(payload.tenant_id),
-            top_k=payload.top_k,
-            filters=payload.filters,
+        res = await asyncio.wait_for(
+            rag_query(
+                question=payload.question,
+                tenant_id=str(payload.tenant_id),
+                user_id=str(payload.user_id),
+                top_k=min(payload.top_k, settings.max_top_k),
+                filters=payload.filters,
+            ),
+            timeout=settings.query_timeout_s,
         )
+        RAG_LATENCY.observe(res["latency_ms"])
         return RagQueryResponse(**res)
     except ValueError as exc:
         raise HTTPException(status_code=400, detail=str(exc)) from exc
+    except TimeoutError as exc:
+        raise HTTPException(status_code=408, detail="rag query timeout") from exc
 
 
 @app.get("/mcp/tools/list_corpora/{tenant_id}", response_model=ListCorporaResponse)

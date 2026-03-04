@@ -8,7 +8,7 @@ TOOLS = [
     },
     {
         "name": "rag_query",
-        "description": "Query enterprise KB via Fireworks GLM-5. POST /mcp/tools/rag_query",
+        "description": "Query enterprise KB via Fireworks GLM-5 with ACL filtering and citation output.",
         "input": ["question", "tenant_id", "user_id", "top_k", "filters"],
     },
     {
@@ -26,6 +26,6 @@ RESOURCES = [
 PROMPTS = [
     {
         "name": "enterprise_qa",
-        "description": "Only answer using retrieved enterprise evidence; cite sources and refuse if evidence is insufficient.",
+        "description": "Only answer using retrieved evidence, always cite chunk/source, refuse if insufficient or unsafe.",
     }
 ]

@@ -1,47 +1,50 @@
-# Enterprise Knowledge Assistant Gateway (M1+)
+# Enterprise Knowledge Assistant Gateway (Final mode)
 
-This project now includes:
-- MCP-compatible tool descriptors (`/mcp/tools`)
-- `index_docs` ingestion (md/txt folder -> chunks -> embeddings -> DB)
-- `rag_query` using **LangChain Fireworks GLM-5**
-- `list_corpora` and resources endpoints
-- health/readiness/metrics endpoints
+This version includes M0~M5 essentials:
+- MCP tool/resource/prompt surface
+- Ingestion (`index_docs`) with idempotency and job status
+- Retrieval + tenant and ACL policy filtering
+- Generation with Fireworks GLM-5 (LangChain) + citations
+- Guardrails for prompt-injection patterns + refusal behavior
+- Audit logs (`query_logs`, `query_chunk_access`)
+- Rate limit + timeout + top_k/context budget controls
+- Metrics endpoint + Prometheus + optional Jaeger service
+- Eval suite with 20-sample golden dataset
 
-## 1) Prepare `.env`
+## 1) Configure `.env`
 
 ```bash
 cp .env.example .env
 ```
 
-Open `.env` and fill your key:
+Fill only your local key:
 
 ```env
 EKA_FIREWORKS_API_KEY=
 ```
 
-> Keep it empty in git, fill locally only.
-
-## 2) Run with Docker
+## 2) Start stack
 
 ```bash
 docker compose up --build
 ```
 
-## 3) Quick API checks
+## 3) Health checks
 
 ```bash
 curl http://localhost:8080/healthz
 curl http://localhost:8080/readyz
+curl http://localhost:8080/metrics
 curl http://localhost:8080/mcp/tools
 ```
 
-## 4) Index sample docs
+## 4) Index sample data
 
 ```bash
 mkdir -p data
 cat > data/handbook.md <<'EOF'
 # Employee Handbook
-All employees must follow security best practices.
+All employees must follow security best practices and compliance requirements.
 EOF
 
 curl -X POST http://localhost:8080/mcp/tools/index_docs \
@@ -55,17 +58,18 @@ curl -X POST http://localhost:8080/mcp/tools/index_docs \
   }'
 ```
 
-Get job status:
+Then poll:
 
 ```bash
 curl http://localhost:8080/mcp/tools/index_docs/<job_id>
 ```
 
-## 5) Run `rag_query` (Fireworks GLM-5)
+## 5) Query RAG
 
 ```bash
 curl -X POST http://localhost:8080/mcp/tools/rag_query \
   -H 'Content-Type: application/json' \
+  -H 'x-user-id: 22222222-2222-2222-2222-222222222222' \
   -d '{
     "question": "What does the handbook say about security?",
     "tenant_id": "11111111-1111-1111-1111-111111111111",
@@ -75,16 +79,34 @@ curl -X POST http://localhost:8080/mcp/tools/rag_query \
   }'
 ```
 
+## 6) Eval (20 golden samples)
+
+```bash
+python eval/run_eval.py
+```
+
+Expected output shape:
+
+```json
+{
+  "hit_rate": 0.7,
+  "citation_coverage": 0.9,
+  "refusal_rate": 1.0,
+  "avg_latency_ms": 800,
+  "samples": 20
+}
+```
+
+## ACL model notes
+
+- ACL table: `acl_policies` with `allow/deny` and `user/group/all` subjects.
+- Retrieval enforces tenant + ACL before ranking.
+- `deny` rule overrides allow.
+
 ## Conda local run (`s_env`)
 
 ```bash
 conda activate s_env
 pip install -r requirements.txt pytest
 uvicorn app.main:app --host 0.0.0.0 --port 8080
-```
-
-## Tests
-
-```bash
-pytest -q
 ```

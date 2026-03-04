@@ -57,6 +57,64 @@ async def init_schema() -> None:
             created_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
         )
         """,
+
+        """
+        CREATE TABLE IF NOT EXISTS users (
+            id UUID PRIMARY KEY,
+            tenant_id UUID NOT NULL,
+            email TEXT,
+            created_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
+        )
+        """,
+        """
+        CREATE TABLE IF NOT EXISTS groups (
+            id UUID PRIMARY KEY,
+            tenant_id UUID NOT NULL,
+            name TEXT NOT NULL,
+            created_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
+        )
+        """,
+        """
+        CREATE TABLE IF NOT EXISTS user_groups (
+            tenant_id UUID NOT NULL,
+            user_id UUID NOT NULL,
+            group_id UUID NOT NULL,
+            PRIMARY KEY (tenant_id, user_id, group_id)
+        )
+        """,
+        """
+        CREATE TABLE IF NOT EXISTS acl_policies (
+            id UUID PRIMARY KEY,
+            tenant_id UUID NOT NULL,
+            resource_type TEXT NOT NULL,
+            resource_id UUID NOT NULL,
+            effect TEXT NOT NULL,
+            subject_type TEXT NOT NULL,
+            subject_id UUID,
+            created_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
+        )
+        """,
+        """
+        CREATE TABLE IF NOT EXISTS query_logs (
+            id UUID PRIMARY KEY,
+            tenant_id UUID NOT NULL,
+            user_id UUID NOT NULL,
+            question_hash TEXT NOT NULL,
+            top_k INT NOT NULL,
+            latency_ms INT NOT NULL,
+            created_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
+        )
+        """,
+        """
+        CREATE TABLE IF NOT EXISTS query_chunk_access (
+            query_id UUID NOT NULL,
+            chunk_id UUID NOT NULL,
+            document_id UUID NOT NULL,
+            rank INT NOT NULL,
+            score DOUBLE PRECISION NOT NULL,
+            PRIMARY KEY (query_id, chunk_id)
+        )
+        """,
     ]
 
     async with engine.begin() as conn:
