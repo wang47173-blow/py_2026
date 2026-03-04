@@ -1,23 +1,25 @@
 from __future__ import annotations
 
-INJECTION_PATTERNS = [
-    "ignore previous instructions",
-    "忽略系统指令",
-    "泄露密钥",
-    "reveal api key",
-    "dump secrets",
+import re
+
+_INJECTION_REGEX = [
+    re.compile(r"\bignore\s+(all\s+)?(previous|prior|system)\s+instructions\b", re.IGNORECASE),
+    re.compile(r"\breveal\s+(api\s+)?key\b", re.IGNORECASE),
+    re.compile(r"\bdump\s+secrets?\b", re.IGNORECASE),
+    re.compile(r"忽略(所有)?(之前|系统)?指令"),
+    re.compile(r"泄露(所有)?密钥"),
+    re.compile(r"base64|rot13|编码绕过", re.IGNORECASE),
 ]
 
 
 def detect_prompt_injection(text: str) -> bool:
-    lowered = text.lower()
-    return any(p in lowered for p in INJECTION_PATTERNS)
+    return any(p.search(text or "") for p in _INJECTION_REGEX)
 
 
 def enforce_refusal_if_needed(question: str, chunks: list[dict]) -> str | None:
     if detect_prompt_injection(question):
         return "我不能执行越权或泄露敏感信息的请求。"
-    joined = "\n".join((c.get("content", "") or "") for c in chunks).lower()
+    joined = "\n".join((c.get("content", "") or "") for c in chunks)
     if detect_prompt_injection(joined):
         return "检索到的文档包含可疑指令注入内容，我将忽略该指令并仅基于安全证据回答。"
     return None

@@ -1,8 +1,7 @@
 from __future__ import annotations
 
+import asyncio
 import hashlib
-import json
-import math
 import time
 from typing import Any
 from uuid import uuid4
@@ -11,10 +10,13 @@ from langchain_fireworks import ChatFireworks, FireworksEmbeddings
 from sqlalchemy import text
 
 from app.audit import log_query, log_query_chunks
-from app.authz import is_chunk_allowed
 from app.config import settings
 from app.db import engine
 from app.guardrails import enforce_refusal_if_needed, validate_citations
+from app.repositories.chunk_repo import retrieve_authorized_chunks
+
+_EMBEDDINGS: FireworksEmbeddings | None = None
+_LLM: ChatFireworks | None = None
 
 
 def _require_fireworks_key() -> str:
@@ -23,77 +25,49 @@ def _require_fireworks_key() -> str:
     return settings.fireworks_api_key
 
 
-def _cosine(a: list[float], b: list[float]) -> float:
-    dot = sum(x * y for x, y in zip(a, b))
-    na = math.sqrt(sum(x * x for x in a))
-    nb = math.sqrt(sum(y * y for y in b))
-    if na == 0 or nb == 0:
-        return 0.0
-    return dot / (na * nb)
+def _get_embeddings() -> FireworksEmbeddings:
+    global _EMBEDDINGS
+    if _EMBEDDINGS is None:
+        _EMBEDDINGS = FireworksEmbeddings(model=settings.fireworks_model, fireworks_api_key=_require_fireworks_key())
+    return _EMBEDDINGS
+
+
+def _get_llm() -> ChatFireworks:
+    global _LLM
+    if _LLM is None:
+        _LLM = ChatFireworks(model=settings.fireworks_model, fireworks_api_key=_require_fireworks_key(), temperature=0)
+    return _LLM
 
 
 async def embed_texts(texts: list[str]) -> list[list[float]]:
-    key = _require_fireworks_key()
-    emb = FireworksEmbeddings(model=settings.fireworks_model, fireworks_api_key=key)
-    return await __import__("asyncio").to_thread(emb.embed_documents, texts)
+    emb = _get_embeddings()
+    vectors = await asyncio.to_thread(emb.embed_documents, texts)
+    dim = settings.embedding_dim
+    return [(v[:dim] + [0.0] * max(0, dim - len(v)))[:dim] for v in vectors]
 
 
 async def embed_query(query: str) -> list[float]:
-    key = _require_fireworks_key()
-    emb = FireworksEmbeddings(model=settings.fireworks_model, fireworks_api_key=key)
-    return await __import__("asyncio").to_thread(emb.embed_query, query)
+    emb = _get_embeddings()
+    v = await asyncio.to_thread(emb.embed_query, query)
+    dim = settings.embedding_dim
+    return (v[:dim] + [0.0] * max(0, dim - len(v)))[:dim]
 
 
 async def retrieve_chunks(
     *, tenant_id: str, user_id: str, top_k: int, filters: dict[str, Any], query_embedding: list[float]
 ) -> list[dict[str, Any]]:
     tag_filter = (filters or {}).get("tag")
-    async with engine.connect() as conn:
-        rs = await conn.execute(
-            text(
-                """
-                SELECT c.id, c.document_id, c.content, c.embedding, c.metadata, d.source_uri
-                FROM document_chunks c
-                JOIN documents d ON d.id = c.document_id
-                WHERE c.tenant_id = :tenant_id
-                """
-            ),
-            {"tenant_id": tenant_id},
-        )
-        rows = rs.fetchall()
-
-    scored: list[dict[str, Any]] = []
-    for row in rows:
-        metadata = row[4] if isinstance(row[4], dict) else json.loads(row[4] or "{}")
-        tags = metadata.get("tags", [])
-        if tag_filter and tag_filter not in tags:
-            continue
-
-        allowed = await is_chunk_allowed(tenant_id, user_id, str(row[0]))
-        if not allowed:
-            continue
-
-        embedding = row[3] if isinstance(row[3], list) else json.loads(row[3])
-        score = _cosine(query_embedding, [float(v) for v in embedding])
-        scored.append(
-            {
-                "chunk_id": row[0],
-                "document_id": row[1],
-                "snippet": row[2][:240],
-                "content": row[2],
-                "source": row[5],
-                "score": score,
-            }
-        )
-
-    scored.sort(key=lambda x: x["score"], reverse=True)
-    return scored[:max(1, min(top_k, settings.max_top_k))]
+    return await retrieve_authorized_chunks(
+        tenant_id=tenant_id,
+        user_id=user_id,
+        top_k=top_k,
+        tag_filter=tag_filter,
+        query_embedding=query_embedding,
+    )
 
 
 async def generate_answer(question: str, chunks: list[dict[str, Any]]) -> str:
-    key = _require_fireworks_key()
-    llm = ChatFireworks(model=settings.fireworks_model, fireworks_api_key=key, temperature=0)
-
+    llm = _get_llm()
     citations_text = "\n".join(
         f"[{i+1}] chunk_id={c['chunk_id']} source={c['source']}\n{c['content']}" for i, c in enumerate(chunks)
     )
@@ -109,7 +83,6 @@ async def generate_answer(question: str, chunks: list[dict[str, Any]]) -> str:
 
 async def rag_query(*, question: str, tenant_id: str, user_id: str, top_k: int, filters: dict[str, Any]) -> dict[str, Any]:
     start = time.perf_counter()
-
     q_emb = await embed_query(question)
     chunks = await retrieve_chunks(
         tenant_id=tenant_id,
@@ -120,10 +93,7 @@ async def rag_query(*, question: str, tenant_id: str, user_id: str, top_k: int, 
     )
 
     refusal = enforce_refusal_if_needed(question, chunks)
-    if refusal:
-        answer = refusal
-    else:
-        answer = await generate_answer(question, chunks)
+    answer = refusal if refusal else await generate_answer(question, chunks)
 
     latency = int((time.perf_counter() - start) * 1000)
     citations = [{"chunk_id": c["chunk_id"], "source": c["source"], "snippet": c["snippet"]} for c in chunks]

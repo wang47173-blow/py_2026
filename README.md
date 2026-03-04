@@ -3,7 +3,7 @@
 This version includes M0~M5 essentials:
 - MCP tool/resource/prompt surface
 - Ingestion (`index_docs`) with idempotency and job status
-- Retrieval + tenant and ACL policy filtering
+- Retrieval + tenant and ACL policy filtering (pgvector index + SQL pushdown)
 - Generation with Fireworks GLM-5 (LangChain) + citations
 - Guardrails for prompt-injection patterns + refusal behavior
 - Audit logs (`query_logs`, `query_chunk_access`)
@@ -136,3 +136,12 @@ make test-fast
 - `index_docs` data source is restricted under `EKA_INGEST_DATA_ROOT`.
 - Ingestion retries are configurable via `EKA_INGEST_MAX_RETRIES`.
 - Keep `.env` local only; never commit keys.
+
+
+## Schema migrations (Alembic)
+
+```bash
+alembic upgrade head
+```
+
+The app also runs migrations on startup before serving traffic.

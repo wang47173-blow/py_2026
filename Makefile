@@ -26,3 +26,7 @@ compose-down:
 
 eval:
 	python eval/run_eval.py
+
+
+migrate:
+	alembic upgrade head

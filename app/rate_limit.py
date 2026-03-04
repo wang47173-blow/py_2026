@@ -3,7 +3,14 @@ from __future__ import annotations
 import time
 from collections import defaultdict, deque
 
-from app.config import settings
+try:
+    from app.config import settings
+except ModuleNotFoundError:  # test/runtime fallback in minimal env
+    class _Settings:
+        enable_rate_limit = True
+        rate_limit_requests_per_minute = 60
+
+    settings = _Settings()  # type: ignore
 
 _BUCKETS: dict[str, deque[float]] = defaultdict(deque)
 

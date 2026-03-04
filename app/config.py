@@ -12,6 +12,7 @@ class Settings(BaseSettings):
     # Fireworks + GLM-5 (LangChain)
     fireworks_api_key: str = ""
     fireworks_model: str = "accounts/fireworks/models/glm-5"
+    embedding_dim: int = 1024
 
     # Non-functional controls
     query_timeout_s: int = 25

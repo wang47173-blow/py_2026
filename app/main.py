@@ -2,6 +2,8 @@ from __future__ import annotations
 
 import asyncio
 import logging
+from collections.abc import AsyncIterator
+from contextlib import asynccontextmanager
 from uuid import UUID
 
 from fastapi import FastAPI, HTTPException, Request
@@ -14,6 +16,7 @@ from app.db import ping_db
 from app.ingestion import create_index_job, get_job_status, init_schema, run_index_job
 from app.logging import setup_logging
 from app.mcp_skeleton import PROMPTS, RESOURCES, TOOLS
+from app.migrations import run_migrations
 from app.rag import list_corpora, rag_query
 from app.rate_limit import allow_request
 from app.schemas import (
@@ -30,15 +33,24 @@ setup_logging(settings.log_level)
 setup_tracing()
 logger = logging.getLogger(__name__)
 tracer = trace.get_tracer(__name__)
+_background_tasks: set[asyncio.Task] = set()
 
-app = FastAPI(title=settings.app_name)
+
+@asynccontextmanager
+async def lifespan(_: FastAPI) -> AsyncIterator[None]:
+    await asyncio.to_thread(run_migrations)
+    await init_schema()
+    try:
+        yield
+    finally:
+        pending = [t for t in _background_tasks if not t.done()]
+        if pending:
+            await asyncio.gather(*pending, return_exceptions=True)
+
+
+app = FastAPI(title=settings.app_name, lifespan=lifespan)
 REQUEST_COUNTER = Counter("eka_http_requests_total", "Total HTTP requests", ["path", "status"])
 RAG_LATENCY = Histogram("eka_rag_latency_ms", "RAG latency ms", buckets=(50, 100, 300, 800, 1500, 3000, 8000))
-
-
-@app.on_event("startup")
-async def startup_event() -> None:
-    await init_schema()
 
 
 @app.middleware("http")
@@ -101,7 +113,9 @@ async def index_docs(payload: IndexDocsRequest) -> IndexDocsResponse:
         tags=payload.tags,
         idempotency_key=payload.idempotency_key,
     )
-    asyncio.create_task(_run_job_safe(job_id))
+    task = asyncio.create_task(_run_job_safe(job_id))
+    _background_tasks.add(task)
+    task.add_done_callback(_background_tasks.discard)
     return IndexDocsResponse(job_id=job_id)
 
 

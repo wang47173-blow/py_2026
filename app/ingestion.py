@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import asyncio
 import hashlib
+import json
 from pathlib import Path
 from typing import Any
 from uuid import UUID, uuid4
@@ -28,7 +29,9 @@ def _resolve_data_source(data_source: str) -> Path:
 
 
 async def init_schema() -> None:
+    dim = settings.embedding_dim
     queries = [
+        "CREATE EXTENSION IF NOT EXISTS vector",
         """
         CREATE TABLE IF NOT EXISTS ingest_jobs (
             id UUID PRIMARY KEY,
@@ -59,7 +62,7 @@ async def init_schema() -> None:
             created_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
         )
         """,
-        """
+        f"""
         CREATE TABLE IF NOT EXISTS document_chunks (
             id UUID PRIMARY KEY,
             tenant_id UUID NOT NULL,
@@ -67,10 +70,13 @@ async def init_schema() -> None:
             chunk_index INT NOT NULL,
             content TEXT NOT NULL,
             embedding JSONB NOT NULL,
-            metadata JSONB NOT NULL DEFAULT '{}'::jsonb,
+            embedding_vec VECTOR({dim}),
+            metadata JSONB NOT NULL DEFAULT '{{}}'::jsonb,
             created_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
         )
         """,
+        f"ALTER TABLE document_chunks ADD COLUMN IF NOT EXISTS embedding_vec VECTOR({dim})",
+        "CREATE INDEX IF NOT EXISTS idx_document_chunks_embedding_hnsw ON document_chunks USING hnsw (embedding_vec vector_l2_ops)",
         """
         CREATE TABLE IF NOT EXISTS users (
             id UUID PRIMARY KEY,
@@ -168,8 +174,8 @@ async def create_index_job(
                 "id": str(job_id),
                 "tenant_id": str(tenant_id),
                 "data_source": data_source,
-                "visibility_policy": __import__("json").dumps(visibility_policy),
-                "tags": __import__("json").dumps(tags),
+                "visibility_policy": json.dumps(visibility_policy),
+                "tags": json.dumps(tags),
                 "k": idempotency_key,
             },
         )
@@ -257,11 +263,12 @@ async def run_index_job(job_id: UUID) -> None:
                     for i, c in enumerate(split):
                         chunk_id = uuid4()
                         chunks += 1
+                        vec_literal = "[" + ",".join(str(float(x)) for x in embeddings[i]) + "]"
                         await conn.execute(
                             text(
                                 """
-                                INSERT INTO document_chunks(id, tenant_id, document_id, chunk_index, content, embedding, metadata)
-                                VALUES(:id, :tenant_id, :document_id, :chunk_index, :content, CAST(:embedding AS JSONB), CAST(:metadata AS JSONB))
+                                INSERT INTO document_chunks(id, tenant_id, document_id, chunk_index, content, embedding, embedding_vec, metadata)
+                                VALUES(:id, :tenant_id, :document_id, :chunk_index, :content, CAST(:embedding AS JSONB), CAST(:embedding_vec AS vector), CAST(:metadata AS JSONB))
                                 """
                             ),
                             {
@@ -270,10 +277,9 @@ async def run_index_job(job_id: UUID) -> None:
                                 "document_id": str(doc_id),
                                 "chunk_index": i,
                                 "content": c,
-                                "embedding": __import__("json").dumps(embeddings[i]),
-                                "metadata": __import__("json").dumps(
-                                    {"visibility_policy": visibility_policy, "tags": tags}
-                                ),
+                                "embedding": json.dumps(embeddings[i]),
+                                "embedding_vec": vec_literal,
+                                "metadata": json.dumps({"visibility_policy": visibility_policy, "tags": tags}),
                             },
                         )
 
