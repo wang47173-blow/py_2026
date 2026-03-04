@@ -11,6 +11,8 @@ services:
     depends_on:
       postgres:
         condition: service_healthy
+      redis:
+        condition: service_started
 
   postgres:
     image: pgvector/pgvector:pg16
@@ -41,3 +43,8 @@ services:
       - "16686:16686"
       - "4317:4317"
       - "4318:4318"
+
+  redis:
+    image: redis:7.4-alpine
+    ports:
+      - "6379:6379"

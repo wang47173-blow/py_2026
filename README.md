@@ -145,3 +145,8 @@ alembic upgrade head
 ```
 
 The app also runs migrations on startup before serving traffic.
+
+
+## Rate limiting backend
+
+By default, limiter uses Redis if `EKA_REDIS_URL` is set; otherwise it falls back to in-memory mode.
